@@ -1,0 +1,43 @@
+# ──────────────────────────────────────────────
+# Python
+# ──────────────────────────────────────────────
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ──────────────────────────────────────────────
+# Environment
+# ──────────────────────────────────────────────
+.env
+
+# ──────────────────────────────────────────────
+# Large files (exceed GitHub 100MB limit)
+# ──────────────────────────────────────────────
+# ML model artifacts (~229MB)
+ml_model/fault_classifier.pkl
+
+# CSV datasets (multi-GB)
+*.csv
+data/raw/
+data/processed/
+
+# ──────────────────────────────────────────────
+# dbt
+# ──────────────────────────────────────────────
+dbt_project/target/
+dbt_project/dbt_packages/
+dbt_project/logs/
+
+# ──────────────────────────────────────────────
+# IDE / OS
+# ──────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+.DS_Store

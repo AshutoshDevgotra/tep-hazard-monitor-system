@@ -1,0 +1,14 @@
+[
+  "reactor_temp",
+  "reactor_pressure",
+  "reactor_level",
+  "feed_a_flow",
+  "feed_d_flow",
+  "reactor_feed_rate",
+  "reactor_temp_rolling_mean",
+  "reactor_temp_rolling_std",
+  "reactor_pressure_rolling_mean",
+  "reactor_pressure_rolling_std",
+  "temp_anomaly_flag",
+  "pressure_anomaly_flag"
+]

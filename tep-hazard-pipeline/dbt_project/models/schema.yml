@@ -1,0 +1,48 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: tep_faulty
+        description: "Raw TEP faulty training data ingested from CSV"
+      - name: tep_fault_free
+        description: "Raw TEP fault-free training data ingested from CSV"
+
+models:
+  - name: stg_tep_sensors
+    description: "Staged TEP sensor readings with renamed columns and cleanup"
+    columns:
+      - name: fault_label
+        description: "Fault type identifier (0 = normal, 1-20 = fault types)"
+        tests:
+          - not_null
+          - accepted_values:
+              values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+      - name: reactor_temp
+        description: "Reactor temperature sensor reading (xmeas_9)"
+        tests:
+          - not_null
+      - name: reactor_pressure
+        description: "Reactor pressure sensor reading (xmeas_7)"
+        tests:
+          - not_null
+
+  - name: int_sensor_features
+    description: "Engineered features with rolling stats and anomaly flags"
+    columns:
+      - name: combined_anomaly_flag
+        description: "1 if either temp or pressure anomaly detected"
+        tests:
+          - not_null
+          - accepted_values:
+              values: [0, 1]
+
+  - name: fault_summary
+    description: "Aggregated fault statistics for dashboard consumption"
+    columns:
+      - name: fault_label
+        description: "Fault type identifier"
+        tests:
+          - unique
+          - not_null
