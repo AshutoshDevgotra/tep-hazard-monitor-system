@@ -64,28 +64,45 @@ ALARM_SOUNDS = {
     "inject_general": os.path.join(ALARMS_DIR, "jeremayjimenez-taiwan-eas-alarm-501825.mp3"),
 }
 
-# Fault type descriptions for alarm context
-FAULT_DESCRIPTIONS = {
-    1: "A/C Feed Ratio Step Change — reactant balance shifted",
-    2: "B Composition Step Change — feed contamination",
-    3: "D Feed Temperature Step — thermal disturbance",
-    4: "Reactor Cooling Water Inlet Temp Step — THERMAL RUNAWAY RISK",
-    5: "Condenser Cooling Water Inlet Temp Step",
-    6: "A Feed Loss Step — feed supply failure",
-    7: "C Header Pressure Loss — PRESSURE CASCADE FAILURE",
-    8: "A+B+C Feed Composition Change",
-    9: "D Feed Temperature Random Variation",
-    10: "C Feed Temperature Random Variation",
-    11: "Reactor Cooling Water Inlet Temp Random — UNSTABLE COOLING",
-    12: "Condenser Cooling Water Inlet Temp Random",
-    13: "Reaction Kinetics Slow Drift",
-    14: "Reactor Cooling Water Valve Sticking",
-    15: "Condenser Cooling Water Valve Sticking",
-    16: "Unknown Fault 16",
-    17: "Unknown Fault 17",
-    18: "Unknown Fault 18",
-    19: "Unknown Fault 19",
-    20: "Unknown Fault 20",
+# Fault type descriptions with sensor source and parameter info
+# Each entry: { description, sensor, parameter, severity }
+FAULT_INFO = {
+    0:  {"desc": "Normal Operation — No fault",                                "sensor": "—",                "param": "—",             "severity": "safe"},
+    1:  {"desc": "A/C Feed Ratio, B Composition Constant (Step)",              "sensor": "xmeas_1 (A Feed)", "param": "Flow Rate",     "severity": "critical"},
+    2:  {"desc": "B Composition, A/C Ratio Constant (Step)",                   "sensor": "xmeas_1 (A Feed)", "param": "Composition",   "severity": "critical"},
+    3:  {"desc": "D Feed Temperature (Step)",                                  "sensor": "xmeas_2 (D Feed)", "param": "Temperature",   "severity": "warning"},
+    4:  {"desc": "Reactor Cooling Water Inlet Temperature (Step)",              "sensor": "xmeas_9 (Reactor Temp)",  "param": "Temperature",   "severity": "critical"},
+    5:  {"desc": "Condenser Cooling Water Inlet Temperature (Step)",            "sensor": "xmeas_11 (Sep Temp)",     "param": "Temperature",   "severity": "warning"},
+    6:  {"desc": "A Feed Loss (Step)",                                         "sensor": "xmeas_1 (A Feed)", "param": "Flow Rate",     "severity": "critical"},
+    7:  {"desc": "C Header Pressure Loss (Step)",                              "sensor": "xmeas_7 (Reactor Press)", "param": "Pressure",     "severity": "critical"},
+    8:  {"desc": "A, B, C Feed Composition (Random)",                          "sensor": "xmeas_1, 2, 4",   "param": "Composition",   "severity": "critical"},
+    9:  {"desc": "D Feed Temperature (Random)",                                "sensor": "xmeas_2 (D Feed)", "param": "Temperature",   "severity": "warning"},
+    10: {"desc": "C Feed Temperature (Random)",                                "sensor": "xmeas_4 (A+C Feed)","param": "Temperature",   "severity": "warning"},
+    11: {"desc": "Reactor Cooling Water Inlet Temperature (Random)",            "sensor": "xmeas_9 (Reactor Temp)",  "param": "Temperature",   "severity": "critical"},
+    12: {"desc": "Condenser Cooling Water Inlet Temperature (Random)",          "sensor": "xmeas_11 (Sep Temp)",     "param": "Temperature",   "severity": "warning"},
+    13: {"desc": "Reaction Kinetics — Slow Drift",                             "sensor": "xmeas_9, 7 (Temp+Press)","param": "Kinetics",      "severity": "warning"},
+    14: {"desc": "Reactor Cooling Water Valve — Sticking",                      "sensor": "xmv_10 (CW Valve)","param": "Valve Position", "severity": "critical"},
+    15: {"desc": "Condenser Cooling Water Valve — Sticking",                    "sensor": "xmv_11 (CW Valve)","param": "Valve Position", "severity": "warning"},
+    16: {"desc": "Unknown Fault 16 — Multiple Variable Interaction",            "sensor": "xmeas_7, 8, 9",   "param": "Multi-Sensor",   "severity": "critical"},
+    17: {"desc": "Unknown Fault 17 — Multiple Variable Interaction",            "sensor": "xmeas_7, 8, 9",   "param": "Multi-Sensor",   "severity": "warning"},
+    18: {"desc": "Unknown Fault 18 — Multiple Variable Interaction",            "sensor": "xmeas_7, 8, 9",   "param": "Multi-Sensor",   "severity": "warning"},
+    19: {"desc": "Unknown Fault 19 — Multiple Variable Interaction",            "sensor": "xmeas_7, 8, 9",   "param": "Multi-Sensor",   "severity": "critical"},
+    20: {"desc": "Unknown Fault 20 — Multiple Variable Interaction",            "sensor": "xmeas_7, 8, 9",   "param": "Multi-Sensor",   "severity": "critical"},
+}
+
+# Legacy dict for backward compat (used in time-series section)
+FAULT_DESCRIPTIONS = {k: v["desc"] for k, v in FAULT_INFO.items() if k > 0}
+
+# Parameter type emoji mapping
+PARAM_EMOJI = {
+    "Temperature": "🌡️",
+    "Pressure": "💨",
+    "Flow Rate": "🌊",
+    "Composition": "🧪",
+    "Valve Position": "🔧",
+    "Kinetics": "⚗️",
+    "Multi-Sensor": "📡",
+    "—": "✅",
 }
 
 # ---------------------------------------------------------------------------
@@ -450,22 +467,35 @@ if not df_summary.empty:
 
     # =========================================================================
     # 🚨 ALARM SYSTEM — Row 0
+    # All 20 fault types (1-20) trigger alarms. Only fault 0 is safe.
     # =========================================================================
     st.markdown("---")
     st.subheader("🚨 Hazard Alarm System")
 
     # Classify each fault type into alarm levels
-    critical_faults = df_summary[
-        (df_summary["fault_label"] > 0) & (df_summary["anomaly_pct"] > ALERT_CRITICAL_PCT)
-    ]
-    warning_faults = df_summary[
-        (df_summary["fault_label"] > 0)
-        & (df_summary["anomaly_pct"] > ALERT_WARNING_PCT)
-        & (df_summary["anomaly_pct"] <= ALERT_CRITICAL_PCT)
-    ]
-    safe_faults = df_summary[
-        (df_summary["fault_label"] > 0) & (df_summary["anomaly_pct"] <= ALERT_WARNING_PCT)
-    ]
+    # Critical: fault types whose severity is "critical" OR anomaly_pct > threshold
+    # Warning: all other non-zero fault types
+    # Safe: only fault_label == 0 (normal operation)
+    all_faults = df_summary[df_summary["fault_label"] > 0]
+
+    def classify_fault_severity(row):
+        fid = int(row["fault_label"])
+        info = FAULT_INFO.get(fid, {})
+        sev = info.get("severity", "warning")
+        if sev == "critical" or row["anomaly_pct"] > ALERT_CRITICAL_PCT:
+            return "critical"
+        return "warning"
+
+    if not all_faults.empty:
+        all_faults = all_faults.copy()
+        all_faults["alarm_level"] = all_faults.apply(classify_fault_severity, axis=1)
+        critical_faults = all_faults[all_faults["alarm_level"] == "critical"]
+        warning_faults = all_faults[all_faults["alarm_level"] == "warning"]
+    else:
+        critical_faults = pd.DataFrame()
+        warning_faults = pd.DataFrame()
+
+    safe_faults = df_summary[df_summary["fault_label"] == 0]
 
     # Alarm sound toggle in sidebar state
     if "alarm_sound_enabled" not in st.session_state:
@@ -509,6 +539,9 @@ if not df_summary.empty:
             inject_alarm_key = "inject_general"
 
     # Show alarm status banner
+    # ALL fault types 1-20 trigger alarms; only fault 0 = safe
+    has_any_faults = len(critical_faults) > 0 or len(warning_faults) > 0
+
     if len(critical_faults) > 0:
         # Emergency flash + siren bar for critical
         st.markdown('<div class="emergency-flash"></div>', unsafe_allow_html=True)
@@ -518,8 +551,8 @@ if not df_summary.empty:
             f"""
             <div class="emergency-banner">
                 <h2>🚨 EMERGENCY ALERT 🚨</h2>
-                <p>⚠️ {len(critical_faults)} CRITICAL fault type(s) detected — anomaly rate exceeds {ALERT_CRITICAL_PCT}%</p>
-                <p style="margin-top:8px; font-size:0.9rem; color:#fca5a5;">IMMEDIATE ACTION REQUIRED — Reactor sensors show dangerous deviations</p>
+                <p>⚠️ {len(critical_faults)} CRITICAL + {len(warning_faults)} WARNING fault type(s) active</p>
+                <p style="margin-top:8px; font-size:0.9rem; color:#fca5a5;">IMMEDIATE ACTION REQUIRED — {len(critical_faults) + len(warning_faults)} of 20 fault types detected in sensor data</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -538,10 +571,10 @@ if not df_summary.empty:
             f"""
             <div class="alarm-warning">
                 <div class="alarm-title" style="color: #fde68a;">
-                    🟡 WARNING — {len(warning_faults)} fault type(s) with elevated anomaly rates
+                    🟡 WARNING — {len(warning_faults)} fault type(s) detected in sensor data
                 </div>
                 <div class="alarm-detail">
-                    Sensor readings show moderate deviations. Monitor closely.
+                    Sensor readings show deviations from normal operation. Monitor closely.
                 </div>
             </div>
             """,
@@ -552,28 +585,31 @@ if not df_summary.empty:
         else:
             play_alarm_sound_js("warning")
     else:
+        # Only shown when ALL data is fault_label == 0 (truly normal operation)
         st.markdown(
             """
             <div class="alarm-safe">
                 <div class="alarm-title" style="color: #86efac;">
-                    🟢 ALL CLEAR — No hazardous anomalies detected
+                    🟢 ALL CLEAR — Normal Operation — No faults detected
                 </div>
                 <div class="alarm-detail">
-                    All fault types are within acceptable anomaly thresholds.
+                    Only normal (Fault 0) data present. All 52 sensors within safe operating ranges.
                 </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-    # Detailed alarm cards in columns
+    # Detailed alarm cards in columns (show ALL fault types 1-20)
     if len(critical_faults) > 0 or len(warning_faults) > 0:
-        alarm_cols = st.columns(min(len(critical_faults) + len(warning_faults), 4))
+        total_alarm_faults = len(critical_faults) + len(warning_faults)
+        alarm_cols = st.columns(min(total_alarm_faults, 4))
         alarm_idx = 0
 
         for _, row in critical_faults.iterrows():
             fault_id = int(row["fault_label"])
-            desc = FAULT_DESCRIPTIONS.get(fault_id, f"Fault Type {fault_id}")
+            info = FAULT_INFO.get(fault_id, {"desc": f"Fault Type {fault_id}", "sensor": "—", "param": "—"})
+            emoji = PARAM_EMOJI.get(info["param"], "⚠️")
             with alarm_cols[alarm_idx % len(alarm_cols)]:
                 st.markdown(
                     f"""
@@ -582,10 +618,12 @@ if not df_summary.empty:
                             🔴 FAULT {fault_id}
                         </div>
                         <div class="alarm-detail">
+                            <b>Cause:</b> {info['desc']}<br>
+                            <b>{emoji} Parameter:</b> {info['param']}<br>
+                            <b>📡 Sensor:</b> {info['sensor']}<br>
                             <b>Anomaly Rate:</b> {row['anomaly_pct']:.2f}%<br>
                             <b>Samples:</b> {int(row['total_samples']):,}<br>
-                            <b>Cause:</b> {desc}<br>
-                            <b>Action:</b> Inspect reactor immediately
+                            <b>Action:</b> 🚨 Inspect reactor immediately
                         </div>
                     </div>
                     """,
@@ -595,7 +633,8 @@ if not df_summary.empty:
 
         for _, row in warning_faults.iterrows():
             fault_id = int(row["fault_label"])
-            desc = FAULT_DESCRIPTIONS.get(fault_id, f"Fault Type {fault_id}")
+            info = FAULT_INFO.get(fault_id, {"desc": f"Fault Type {fault_id}", "sensor": "—", "param": "—"})
+            emoji = PARAM_EMOJI.get(info["param"], "⚠️")
             with alarm_cols[alarm_idx % len(alarm_cols)]:
                 st.markdown(
                     f"""
@@ -604,10 +643,12 @@ if not df_summary.empty:
                             🟡 FAULT {fault_id}
                         </div>
                         <div class="alarm-detail">
+                            <b>Cause:</b> {info['desc']}<br>
+                            <b>{emoji} Parameter:</b> {info['param']}<br>
+                            <b>📡 Sensor:</b> {info['sensor']}<br>
                             <b>Anomaly Rate:</b> {row['anomaly_pct']:.2f}%<br>
                             <b>Samples:</b> {int(row['total_samples']):,}<br>
-                            <b>Cause:</b> {desc}<br>
-                            <b>Action:</b> Increase monitoring frequency
+                            <b>Action:</b> ⚠️ Increase monitoring frequency
                         </div>
                     </div>
                     """,
@@ -615,26 +656,44 @@ if not df_summary.empty:
                 )
             alarm_idx += 1
 
-    # Alarm history log
-    with st.expander("📋 Full Alarm Log — All Fault Types"):
-        alarm_log = df_summary[df_summary["fault_label"] > 0].copy()
-        alarm_log["status"] = alarm_log["anomaly_pct"].apply(
-            lambda x: "🔴 CRITICAL" if x > ALERT_CRITICAL_PCT
-            else ("🟡 WARNING" if x > ALERT_WARNING_PCT else "🟢 NORMAL")
+    # Alarm history log — ALL 20 faults are alarmed, only fault 0 is safe
+    with st.expander("📋 Full Alarm Log — All 20 Fault Types + Normal"):
+        alarm_log = df_summary.copy()
+
+        def get_alarm_status(row):
+            fid = int(row["fault_label"])
+            if fid == 0:
+                return "🟢 NORMAL"
+            info = FAULT_INFO.get(fid, {})
+            sev = info.get("severity", "warning")
+            if sev == "critical" or row["anomaly_pct"] > ALERT_CRITICAL_PCT:
+                return "🔴 CRITICAL"
+            return "🟡 WARNING"
+
+        alarm_log["status"] = alarm_log.apply(get_alarm_status, axis=1)
+        alarm_log["description"] = alarm_log["fault_label"].map(
+            lambda fid: FAULT_INFO.get(int(fid), {}).get("desc", f"Fault {fid}")
         )
-        alarm_log["description"] = alarm_log["fault_label"].map(FAULT_DESCRIPTIONS)
-        alarm_log["recommended_action"] = alarm_log["anomaly_pct"].apply(
-            lambda x: "IMMEDIATE INSPECTION" if x > ALERT_CRITICAL_PCT
-            else ("Increase monitoring" if x > ALERT_WARNING_PCT else "Routine check")
+        alarm_log["sensor_source"] = alarm_log["fault_label"].map(
+            lambda fid: FAULT_INFO.get(int(fid), {}).get("sensor", "—")
+        )
+        alarm_log["parameter_type"] = alarm_log["fault_label"].map(
+            lambda fid: FAULT_INFO.get(int(fid), {}).get("param", "—")
+        )
+        alarm_log["recommended_action"] = alarm_log.apply(
+            lambda row: "No action needed" if int(row["fault_label"]) == 0
+            else ("🚨 IMMEDIATE INSPECTION" if row["status"] == "🔴 CRITICAL" else "⚠️ Increase monitoring"),
+            axis=1,
         )
         st.dataframe(
-            alarm_log[["fault_label", "status", "anomaly_pct", "total_samples",
+            alarm_log[["fault_label", "status", "parameter_type", "sensor_source",
+                        "anomaly_pct", "total_samples",
                         "avg_reactor_temp", "avg_reactor_pressure",
                         "description", "recommended_action"]].sort_values(
-                "anomaly_pct", ascending=False
+                "fault_label", ascending=True
             ),
             use_container_width=True,
-            height=400,
+            height=500,
         )
 
     st.markdown("---")
@@ -852,7 +911,7 @@ if not df_summary.empty:
         st.info("No simulation runs found in the database.")
 
     # =========================================================================
-    # Row 4 — Raw Data Table
+    # Row 4 — Raw Data Table with sensor source & parameter info
     # =========================================================================
     st.subheader("🗂️ Recent Sensor Readings")
 
@@ -864,10 +923,31 @@ if not df_summary.empty:
         available_cols = [c for c in display_cols if c in df_features.columns]
         df_display = df_features[available_cols].copy()
 
+        # Add fault name, sensor source, and parameter type columns
+        df_display["fault_name"] = df_display["fault_label"].map(
+            lambda fid: FAULT_INFO.get(int(fid), {}).get("desc", "—") if pd.notna(fid) else "—"
+        )
+        df_display["sensor_source"] = df_display["fault_label"].map(
+            lambda fid: FAULT_INFO.get(int(fid), {}).get("sensor", "—") if pd.notna(fid) else "—"
+        )
+        df_display["parameter_type"] = df_display["fault_label"].map(
+            lambda fid: FAULT_INFO.get(int(fid), {}).get("param", "—") if pd.notna(fid) else "—"
+        )
+
+        # Reorder columns for clarity
+        ordered_cols = ["sample_num", "fault_label", "fault_name", "parameter_type",
+                        "sensor_source", "reactor_temp", "reactor_pressure",
+                        "combined_anomaly_flag"]
+        ordered_cols = [c for c in ordered_cols if c in df_display.columns]
+        df_display = df_display[ordered_cols]
+
         # Style anomaly rows
         def highlight_anomaly(row):
             if row.get("combined_anomaly_flag", 0) == 1:
                 return ["background-color: #7f1d1d; color: #fca5a5"] * len(row)
+            fid = row.get("fault_label", 0)
+            if pd.notna(fid) and int(fid) > 0:
+                return ["background-color: #1e293b; color: #fde68a"] * len(row)
             return [""] * len(row)
 
         styled = df_display.style.apply(highlight_anomaly, axis=1)
